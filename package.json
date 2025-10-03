@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@next/swc-win32-x64-msvc": "^15.5.4",
     "@supabase/supabase-js": "^2.38.0",
     "cookie": "^0.5.0",
     "jsonwebtoken": "^9.0.2",
