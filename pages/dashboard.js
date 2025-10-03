@@ -40,66 +40,56 @@ export default function Dashboard({ session }) {
     }
   }
 
-  // Test session API with Bearer token
-  const testSessionAPI = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session) {
-        setApiTestResult('No session found')
-        return
-      }
+ const testSessionAPI = async () => {
+  // 1) Always call getSession() right before the API call—
+  //    this ensures you get the current, unexpired token.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
 
-      const response = await fetch('/api/auth/session', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      const data = await response.json()
-      
-      if (response.ok) {
-        setApiTestResult(`✅ Session API Success: ${data.user.email}`)
-      } else {
-        setApiTestResult(`❌ Session API Error: ${data.error}`)
-      }
-    } catch (error) {
-      setApiTestResult(`❌ Session API Error: ${error.message}`)
-    }
+  if (!session) {
+    setApiTestResult('❌ No session found')
+    return
   }
 
-  // Test protected API with Bearer token
-  const testProtectedAPI = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session) {
-        setProtectedTestResult('No session found')
-        return
-      }
+  // 2) Send that access_token in the Authorization header:
+  const response = await fetch('/api/auth/session', {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  })
 
-      const response = await fetch('/api/protected/check', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+  const payload = await response.json()
+  if (response.ok) {
+    setApiTestResult(`✅ Session API Success: ${payload.user.email}`)
+  } else {
+    setApiTestResult(`❌ Session API Error: ${payload.error}`)
+  }
+}
 
-      const data = await response.json()
-      
-      if (response.ok) {
-        setProtectedTestResult(`✅ Protected API Success: ${data.message}`)
-      } else {
-        setProtectedTestResult(`❌ Protected API Error: ${data.error}`)
-      }
-    } catch (error) {
-      setProtectedTestResult(`❌ Protected API Error: ${error.message}`)
-    }
+const testProtectedAPI = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (!session) {
+    setProtectedTestResult('❌ No session found')
+    return
   }
 
+  const response = await fetch('/api/protected/check', {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  })
+
+  const payload = await response.json()
+  if (response.ok) {
+    setProtectedTestResult(`✅ Protected API Success: ${payload.message}`)
+  } else {
+    setProtectedTestResult(`❌ Protected API Error: ${payload.error}`)
+  }
+}
   // Fetch seller data using authenticated API call
   const fetchSellerData = async () => {
     try {
