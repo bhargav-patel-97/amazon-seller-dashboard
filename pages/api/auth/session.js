@@ -1,5 +1,4 @@
 import { supabaseService } from '../../../lib/supabaseService'
-import cookie from 'cookie'
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -7,23 +6,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    let token = null
-
-    // Check Authorization header first
+    // Get token from Authorization header
     const authHeader = req.headers.authorization
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7)
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No valid authorization header' })
     }
 
-    // Check for session cookie if no Bearer token
-    if (!token && req.headers.cookie) {
-      const cookies = cookie.parse(req.headers.cookie)
-      token = cookies['supabase-auth-token']
-    }
-
-    if (!token) {
-      return res.status(401).json({ error: 'No authentication token provided' })
-    }
+    const token = authHeader.substring(7)
 
     // Verify token with Supabase
     const { data: { user }, error } = await supabaseService.auth.getUser(token)
@@ -32,7 +21,6 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid or expired token' })
     }
 
-    // Return user information
     res.status(200).json({
       user: {
         id: user.id,

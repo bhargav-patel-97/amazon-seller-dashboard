@@ -6,6 +6,8 @@ export default function Dashboard({ session }) {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [userProfile, setUserProfile] = useState(null)
+  const [apiTestResult, setApiTestResult] = useState(null)
+  const [protectedTestResult, setProtectedTestResult] = useState(null)
 
   useEffect(() => {
     if (!session) {
@@ -35,6 +37,90 @@ export default function Dashboard({ session }) {
       console.error('Error loading profile:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Test session API with Bearer token
+  const testSessionAPI = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        setApiTestResult('No session found')
+        return
+      }
+
+      const response = await fetch('/api/auth/session', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      const data = await response.json()
+      
+      if (response.ok) {
+        setApiTestResult(`✅ Session API Success: ${data.user.email}`)
+      } else {
+        setApiTestResult(`❌ Session API Error: ${data.error}`)
+      }
+    } catch (error) {
+      setApiTestResult(`❌ Session API Error: ${error.message}`)
+    }
+  }
+
+  // Test protected API with Bearer token
+  const testProtectedAPI = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        setProtectedTestResult('No session found')
+        return
+      }
+
+      const response = await fetch('/api/protected/check', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      const data = await response.json()
+      
+      if (response.ok) {
+        setProtectedTestResult(`✅ Protected API Success: ${data.message}`)
+      } else {
+        setProtectedTestResult(`❌ Protected API Error: ${data.error}`)
+      }
+    } catch (error) {
+      setProtectedTestResult(`❌ Protected API Error: ${error.message}`)
+    }
+  }
+
+  // Fetch seller data using authenticated API call
+  const fetchSellerData = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) return
+
+      // Example: Call your API routes with Bearer token
+      const [salesResponse, inventoryResponse] = await Promise.all([
+        fetch('/api/seller/sales', {
+          headers: { 'Authorization': `Bearer ${session.access_token}` }
+        }),
+        fetch('/api/seller/inventory', {
+          headers: { 'Authorization': `Bearer ${session.access_token}` }
+        })
+      ])
+
+      // Handle responses...
+      console.log('API calls made with Bearer tokens')
+    } catch (error) {
+      console.error('Error fetching seller data:', error)
     }
   }
 
@@ -78,6 +164,40 @@ export default function Dashboard({ session }) {
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
+          {/* API Testing Section */}
+          <div className="mb-8 bg-white shadow rounded-lg p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">API Testing (Bearer Token)</h3>
+            <div className="space-y-4">
+              <div>
+                <button
+                  onClick={testSessionAPI}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium mr-4"
+                >
+                  Test Session API
+                </button>
+                {apiTestResult && (
+                  <div className="mt-2 text-sm">
+                    {apiTestResult}
+                  </div>
+                )}
+              </div>
+              <div>
+                <button
+                  onClick={testProtectedAPI}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium mr-4"
+                >
+                  Test Protected API
+                </button>
+                {protectedTestResult && (
+                  <div className="mt-2 text-sm">
+                    {protectedTestResult}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Dashboard Content */}
           <div className="border-4 border-dashed border-gray-200 rounded-lg p-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">
               Welcome to your dashboard!
