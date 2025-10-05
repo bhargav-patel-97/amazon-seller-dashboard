@@ -6,7 +6,6 @@
  * Auth: x-cron-secret header
  * Payload: { startDate?, endDate?, granularity? }
  */
-
 import { SPAPIClient, RateLimiter } from '../../../lib/spApiClient.js';
 import SupabaseService from '../../../lib/supabaseService.js';
 
@@ -37,12 +36,27 @@ export default async function handler(req, res) {
     const supabaseService = new SupabaseService();
     const spApiClient = new SPAPIClient();
 
-    // 3. Parse request parameters
-    const { 
+    // 3. Parse request parameters and process template variables
+    let { 
       startDate = getYesterdayISO(), 
       endDate = getYesterdayISO(),
       granularity = 'Daily'
     } = req.method === 'POST' ? req.body : req.query;
+
+    // Process template variables
+    startDate = processTemplateVariable(startDate);
+    endDate = processTemplateVariable(endDate);
+
+    // Validate processed dates
+    if (!isValidDate(startDate)) {
+      startDate = getYesterdayISO();
+      console.warn(`Invalid startDate received, using fallback: ${startDate}`);
+    }
+    
+    if (!isValidDate(endDate)) {
+      endDate = getYesterdayISO();
+      console.warn(`Invalid endDate received, using fallback: ${endDate}`);
+    }
 
     console.log(`Starting sales ingestion for ${startDate} to ${endDate}`);
 
@@ -161,12 +175,99 @@ export default async function handler(req, res) {
 }
 
 /**
+ * Process template variables from cron services
+ * Supports common date templates like {{LAST_WEEK_START}}, {{LAST_WEEK_END}}, etc.
+ */
+function processTemplateVariable(dateString) {
+  if (typeof dateString !== 'string') {
+    return dateString;
+  }
+
+  const today = new Date();
+  
+  // Handle template variables
+  switch (dateString.trim()) {
+    case '{{LAST_WEEK_START}}':
+      return getLastWeekStart();
+    
+    case '{{LAST_WEEK_END}}':
+      return getLastWeekEnd();
+      
+    case '{{YESTERDAY}}':
+      return getYesterdayISO();
+      
+    case '{{TODAY}}':
+      return getTodayISO();
+      
+    case '{{LAST_MONTH_START}}':
+      return getLastMonthStart();
+      
+    case '{{LAST_MONTH_END}}':
+      return getLastMonthEnd();
+    
+    // If it's not a template variable, return as-is
+    default:
+      return dateString;
+  }
+}
+
+/**
  * Helper function to get yesterday's date in ISO format
  */
 function getYesterdayISO() {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   return yesterday.toISOString().split('T')[0];
+}
+
+/**
+ * Helper function to get today's date in ISO format
+ */
+function getTodayISO() {
+  const today = new Date();
+  return today.toISOString().split('T')[0];
+}
+
+/**
+ * Helper function to get last week's start date (Monday)
+ */
+function getLastWeekStart() {
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const daysToLastMonday = dayOfWeek === 0 ? 13 : (dayOfWeek + 6); // If Sunday, go back 13 days, else go back to last Monday
+  const lastWeekStart = new Date(today);
+  lastWeekStart.setDate(today.getDate() - daysToLastMonday);
+  return lastWeekStart.toISOString().split('T')[0];
+}
+
+/**
+ * Helper function to get last week's end date (Sunday)  
+ */
+function getLastWeekEnd() {
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const daysToLastSunday = dayOfWeek === 0 ? 7 : dayOfWeek; // If Sunday, go back 7 days, else go back to last Sunday
+  const lastWeekEnd = new Date(today);
+  lastWeekEnd.setDate(today.getDate() - daysToLastSunday);
+  return lastWeekEnd.toISOString().split('T')[0];
+}
+
+/**
+ * Helper function to get last month's start date
+ */
+function getLastMonthStart() {
+  const today = new Date();
+  const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  return lastMonth.toISOString().split('T')[0];
+}
+
+/**
+ * Helper function to get last month's end date
+ */
+function getLastMonthEnd() {
+  const today = new Date();
+  const lastMonth = new Date(today.getFullYear(), today.getMonth(), 0); // Day 0 of current month = last day of previous month
+  return lastMonth.toISOString().split('T')[0];
 }
 
 /**
