@@ -7,8 +7,8 @@
  * Payload: { startDate?, endDate?, campaignType? }
  */
 
-import { AmazonAdsClient, RateLimiter } from '../../lib/spApiClient.js';
-import SupabaseService from '../../lib/supabaseService.js';
+import { AmazonAdsClient, RateLimiter } from '../../../lib/spApiClient.js';
+import SupabaseService from '../../../lib/supabaseService.js';
 
 // Rate limiter for Ads API (more generous than SP-API)
 const rateLimiter = new RateLimiter(2, 10);

@@ -7,8 +7,8 @@
  * Payload: { startDate?, endDate?, granularity? }
  */
 
-import { SPAPIClient, RateLimiter } from '../../lib/spApiClient.js';
-import SupabaseService from '../../lib/supabaseService.js';
+import { SPAPIClient, RateLimiter } from '../../../lib/spApiClient.js';
+import SupabaseService from '../../../lib/supabaseService.js';
 
 // Rate limiter for SP-API compliance (1 req/sec for sales data)
 const rateLimiter = new RateLimiter(1, 5);
