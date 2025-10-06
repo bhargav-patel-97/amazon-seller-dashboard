@@ -1,15 +1,11 @@
 /**
- * Sales Data Ingestion Cron Endpoint
- * Fetches sales and traffic data from Amazon SP-API and stores in Supabase
- * 
- * Endpoint: POST /api/cron/ingest-sales
- * Auth: x-cron-secret header
- * Payload: { startDate?, endDate?, granularity? }
+ * Sales Data Ingestion Cron Endpoint - Production Version
+ * Only processes real SP-API data, no mock data generation
  */
 import { SPAPIClient, RateLimiter } from '../../../lib/spApiClient.js';
 import SupabaseService from '../../../lib/supabaseService.js';
 
-// Rate limiter for SP-API compliance (1 req/sec for sales data)
+// Rate limiter for SP-API compliance
 const rateLimiter = new RateLimiter(1, 5);
 
 export default async function handler(req, res) {
@@ -72,63 +68,88 @@ export default async function handler(req, res) {
     // 5. Apply rate limiting before API calls
     await rateLimiter.waitForToken();
 
-    // 6. Fetch sales data from SP-API (or mock data)
-    const salesResult = await spApiClient.getSalesData(startDate, endDate, granularity);
+    // 6. Fetch sales data from SP-API (production - no fallback)
+    let salesResult;
+    try {
+      salesResult = await spApiClient.getSalesData(startDate, endDate, granularity);
+    } catch (error) {
+      console.error('SP-API sales data fetch failed:', error.message);
+      
+      // Log the failure and return error
+      await supabaseService.logIngestion('sales', 'failed', {
+        error: error.message,
+        stack: error.stack,
+        duration: Date.now() - startTime,
+        phase: 'sp_api_fetch'
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: 'SP-API request failed',
+        message: error.message,
+        logId: logId?.id,
+        duration: `${Date.now() - startTime}ms`
+      });
+    }
     
+    // 7. Check if we have any data to process
     if (!salesResult.metrics || salesResult.metrics.length === 0) {
+      console.log('No sales data found for the specified date range');
+      
       await supabaseService.logIngestion('sales', 'completed', {
         recordsProcessed: 0,
-        message: 'No data available for date range',
-        duration: Date.now() - startTime
+        message: 'No sales data available for date range',
+        duration: Date.now() - startTime,
+        totalRecordsProcessed: salesResult.totalRecordsProcessed || 0
       });
 
       return res.status(200).json({
         success: true,
         message: 'No sales data available for the specified date range',
         recordsProcessed: 0,
-        dateRange: { startDate, endDate }
+        totalRecordsScanned: salesResult.totalRecordsProcessed || 0,
+        dateRange: { startDate, endDate, granularity },
+        duration: `${Date.now() - startTime}ms`,
+        logId: logId?.id
       });
     }
 
-    // 7. Also fetch orders data if available
-    let ordersResult = null;
-    try {
-      await rateLimiter.waitForToken();
-      ordersResult = await spApiClient.getOrdersData(startDate, endDate);
-    } catch (error) {
-      console.warn('Failed to fetch orders data:', error.message);
-      // Continue with sales data only
-    }
-
-    // 8. Store data in Supabase
+    // 8. Store sales data in database
     const salesUpsertResult = await supabaseService.upsertSalesData(
       salesResult.metrics, 
       'sp-api-cron'
     );
 
+    // 9. Try to fetch orders data (optional - don't fail if this errors)
     let ordersUpsertResult = { count: 0 };
-    if (ordersResult && ordersResult.orders) {
-      try {
+    try {
+      await rateLimiter.waitForToken();
+      const ordersResult = await spApiClient.getOrdersData(startDate, endDate);
+      
+      if (ordersResult && ordersResult.orders && ordersResult.orders.length > 0) {
         ordersUpsertResult = await supabaseService.upsertOrdersData(
           ordersResult.orders,
           'sp-api-cron'
         );
-      } catch (error) {
-        console.error('Failed to upsert orders:', error.message);
       }
+    } catch (error) {
+      console.warn('Failed to fetch/process orders data (non-critical):', error.message);
+      // Continue without orders data
     }
 
-    // 9. Log successful completion
+    // 10. Log successful completion
     const duration = Date.now() - startTime;
     await supabaseService.logIngestion('sales', 'completed', {
       recordsProcessed: salesUpsertResult.count + ordersUpsertResult.count,
       salesRecords: salesUpsertResult.count,
       orderRecords: ordersUpsertResult.count,
+      totalRecordsScanned: salesResult.totalRecordsProcessed || 0,
+      nonZeroRecords: salesResult.nonZeroRecords || 0,
       duration,
       rateLimitInfo: salesResult.rateLimitInfo
     });
 
-    // 10. Return success response
+    // 11. Return success response
     res.status(200).json({
       success: true,
       message: 'Sales data ingestion completed successfully',
@@ -137,6 +158,8 @@ export default async function handler(req, res) {
         orders: ordersUpsertResult.count,
         total: salesUpsertResult.count + ordersUpsertResult.count
       },
+      totalRecordsScanned: salesResult.totalRecordsProcessed || 0,
+      nonZeroRecords: salesResult.nonZeroRecords || 0,
       dateRange: { startDate, endDate, granularity },
       duration: `${duration}ms`,
       logId: logId?.id,
@@ -147,12 +170,16 @@ export default async function handler(req, res) {
     console.error('Sales ingestion failed:', error);
     
     // Log the failure
-    const supabaseService = new SupabaseService();
-    await supabaseService.logIngestion('sales', 'failed', {
-      error: error.message,
-      stack: error.stack,
-      duration: Date.now() - startTime
-    });
+    try {
+      const supabaseService = new SupabaseService();
+      await supabaseService.logIngestion('sales', 'failed', {
+        error: error.message,
+        stack: error.stack,
+        duration: Date.now() - startTime
+      });
+    } catch (logError) {
+      console.error('Failed to log error:', logError);
+    }
 
     // Handle specific error types
     if (error.message.includes('rate limit')) {
@@ -161,6 +188,16 @@ export default async function handler(req, res) {
         error: 'Rate limit exceeded',
         message: 'Amazon API rate limit hit, please retry later',
         retryAfter: 60
+      });
+    }
+
+    if (error.message.includes('credentials') || error.message.includes('Missing')) {
+      return res.status(500).json({
+        success: false,
+        error: 'Configuration error',
+        message: 'Missing required API credentials',
+        logId: logId?.id,
+        duration: `${Date.now() - startTime}ms`
       });
     }
 
@@ -176,43 +213,38 @@ export default async function handler(req, res) {
 
 /**
  * Process template variables from cron services
- * Supports common date templates like {{LAST_WEEK_START}}, {{LAST_WEEK_END}}, etc.
  */
 function processTemplateVariable(dateString) {
   if (typeof dateString !== 'string') {
     return dateString;
   }
 
-  const today = new Date();
-  
-  // Handle template variables
   switch (dateString.trim()) {
     case '{{LAST_WEEK_START}}':
       return getLastWeekStart();
     
     case '{{LAST_WEEK_END}}':
       return getLastWeekEnd();
-      
+    
     case '{{YESTERDAY}}':
       return getYesterdayISO();
-      
+    
     case '{{TODAY}}':
       return getTodayISO();
-      
+    
     case '{{LAST_MONTH_START}}':
       return getLastMonthStart();
-      
+    
     case '{{LAST_MONTH_END}}':
       return getLastMonthEnd();
     
-    // If it's not a template variable, return as-is
     default:
       return dateString;
   }
 }
 
 /**
- * Helper function to get yesterday's date in ISO format
+ * Helper functions for date processing
  */
 function getYesterdayISO() {
   const yesterday = new Date();
@@ -220,59 +252,41 @@ function getYesterdayISO() {
   return yesterday.toISOString().split('T')[0];
 }
 
-/**
- * Helper function to get today's date in ISO format
- */
 function getTodayISO() {
   const today = new Date();
   return today.toISOString().split('T')[0];
 }
 
-/**
- * Helper function to get last week's start date (Monday)
- */
 function getLastWeekStart() {
   const today = new Date();
-  const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  const daysToLastMonday = dayOfWeek === 0 ? 13 : (dayOfWeek + 6); // If Sunday, go back 13 days, else go back to last Monday
+  const dayOfWeek = today.getDay();
+  const daysToLastMonday = dayOfWeek === 0 ? 13 : (dayOfWeek + 6);
   const lastWeekStart = new Date(today);
   lastWeekStart.setDate(today.getDate() - daysToLastMonday);
   return lastWeekStart.toISOString().split('T')[0];
 }
 
-/**
- * Helper function to get last week's end date (Sunday)  
- */
 function getLastWeekEnd() {
   const today = new Date();
-  const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  const daysToLastSunday = dayOfWeek === 0 ? 7 : dayOfWeek; // If Sunday, go back 7 days, else go back to last Sunday
+  const dayOfWeek = today.getDay();
+  const daysToLastSunday = dayOfWeek === 0 ? 7 : dayOfWeek;
   const lastWeekEnd = new Date(today);
   lastWeekEnd.setDate(today.getDate() - daysToLastSunday);
   return lastWeekEnd.toISOString().split('T')[0];
 }
 
-/**
- * Helper function to get last month's start date
- */
 function getLastMonthStart() {
   const today = new Date();
   const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
   return lastMonth.toISOString().split('T')[0];
 }
 
-/**
- * Helper function to get last month's end date
- */
 function getLastMonthEnd() {
   const today = new Date();
-  const lastMonth = new Date(today.getFullYear(), today.getMonth(), 0); // Day 0 of current month = last day of previous month
+  const lastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
   return lastMonth.toISOString().split('T')[0];
 }
 
-/**
- * Helper function to validate date format
- */
 function isValidDate(dateString) {
   const regex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateString.match(regex)) return false;
@@ -281,7 +295,6 @@ function isValidDate(dateString) {
   return date instanceof Date && !isNaN(date);
 }
 
-// For local testing
 export const config = {
   api: {
     bodyParser: {
