@@ -1,5 +1,5 @@
 // pages/dashboard/index.js
-// Protected Sales Dashboard with Filters and Charts
+// Protected Sales Dashboard with Filters and Charts - Current week default, no mock data
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
@@ -7,6 +7,25 @@ import { supabase } from '../../lib/supabaseClient'
 import MarketFilter from '../../components/MarketFilter'
 import SalesChart from '../../components/SalesChart'
 import TopSkusBar from '../../components/TopSkusBar'
+
+// Helper functions for current week dates
+function getCurrentWeekStart() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - daysToMonday)
+  return monday.toISOString().split('T')[0]
+}
+
+function getCurrentWeekEnd() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek
+  const sunday = new Date(today)
+  sunday.setDate(today.getDate() + daysToSunday)
+  return sunday.toISOString().split('T')[0]
+}
 
 export default function Dashboard({ session }) {
   const router = useRouter()
@@ -23,11 +42,12 @@ export default function Dashboard({ session }) {
     salesData: [],
     topSkus: []
   })
+  // Set default filters to current week
   const [filters, setFilters] = useState({
     marketplace: 'US',
     sku: '',
-    fromDate: '2024-01-01',
-    toDate: '2024-12-31'
+    fromDate: getCurrentWeekStart(),
+    toDate: getCurrentWeekEnd()
   })
   const [userProfile, setUserProfile] = useState(null)
   const [error, setError] = useState(null)
@@ -110,7 +130,7 @@ export default function Dashboard({ session }) {
       console.error('Error loading dashboard data:', err)
       setError(err.message)
       
-      // Set fallback data on error
+      // Set empty data on error (NO FALLBACK TO MOCK DATA)
       setDashboardData({
         metrics: {
           revenue: 0,
@@ -201,7 +221,7 @@ export default function Dashboard({ session }) {
               }}>
                 {userProfile?.full_name || session.user.email} • 
                 {filters.marketplace} • 
-                {filters.fromDate} to {filters.toDate}
+                Current Week: {filters.fromDate} to {filters.toDate}
               </p>
             </div>
             <button
@@ -250,6 +270,26 @@ export default function Dashboard({ session }) {
           </div>
         )}
 
+        {/* Data Source Indicator */}
+        {dashboardData.dataSource && (
+          <div style={{
+            marginBottom: '24px',
+            padding: '12px 16px',
+            backgroundColor: dashboardData.dataSource === 'database' ? '#f0f9ff' : '#fefce8',
+            borderRadius: '6px',
+            borderLeft: `4px solid ${dashboardData.dataSource === 'database' ? '#3b82f6' : '#f59e0b'}`
+          }}>
+            <p style={{ 
+              fontSize: '14px', 
+              color: dashboardData.dataSource === 'database' ? '#1e40af' : '#92400e',
+              margin: 0 
+            }}>
+              <strong>Data Source:</strong> {dashboardData.dataSource === 'database' ? 'Live Database' : 'Sample Data'} • 
+              Showing {dashboardData.salesData?.length || 0} data points for {filters.marketplace} marketplace
+            </p>
+          </div>
+        )}
+
         {/* Filters */}
         <MarketFilter 
           filters={filters}
@@ -269,25 +309,25 @@ export default function Dashboard({ session }) {
               minimumFractionDigits: 2, 
               maximumFractionDigits: 2 
             }) || '0.00'}`}
-            change={+5.2}
+            change={0} // Remove fake change indicators
             color="#10b981"
           />
           <MetricCard 
             title="Orders" 
             value={dashboardData.metrics.orders?.toLocaleString() || '0'}
-            change={+12.8}
+            change={0}
             color="#3b82f6"
           />
           <MetricCard 
             title="Units Sold" 
             value={dashboardData.metrics.unitsSold?.toLocaleString() || '0'}
-            change={-2.1}
+            change={0}
             color="#8b5cf6"
           />
           <MetricCard 
             title="ACOS" 
             value={`${dashboardData.metrics.acos?.toFixed(1) || '0.0'}%`}
-            change={-1.3}
+            change={0}
             color="#f59e0b"
             isPercentage
           />
@@ -322,9 +362,8 @@ export default function Dashboard({ session }) {
           color: '#6b7280'
         }}>
           <p style={{ margin: 0 }}>
-            Data source: {dashboardData.dataSource || 'unknown'} • 
             Last updated: {new Date().toLocaleString()} • 
-            Showing {dashboardData.salesData?.length || 0} data points
+            Current week data from {filters.fromDate} to {filters.toDate}
           </p>
         </div>
       </main>
@@ -340,17 +379,14 @@ export default function Dashboard({ session }) {
   )
 }
 
-// Metric Card Component
+// Metric Card Component (remove fake change indicators)
 const MetricCard = ({ 
   title, 
   value, 
-  change, 
+  change = 0, 
   color = "#6b7280", 
   isPercentage = false 
 }) => {
-  const changeColor = change > 0 ? '#10b981' : change < 0 ? '#ef4444' : '#6b7280'
-  const changeIcon = change > 0 ? '↗' : change < 0 ? '↘' : '→'
-  
   return (
     <div style={{
       backgroundColor: 'white',
@@ -364,7 +400,7 @@ const MetricCard = ({
         alignItems: 'center',
         justifyContent: 'space-between'
       }}>
-        <div>
+        <div style={{ width: '100%' }}>
           <p style={{
             fontSize: '14px',
             fontWeight: '500',
@@ -381,16 +417,6 @@ const MetricCard = ({
           }}>
             {value}
           </p>
-        </div>
-        <div style={{
-          fontSize: '14px',
-          color: changeColor,
-          textAlign: 'right'
-        }}>
-          <span style={{ display: 'inline-block' }}>{changeIcon}</span>
-          <span style={{ marginLeft: '4px' }}>
-            {Math.abs(change).toFixed(1)}{isPercentage ? 'pp' : '%'}
-          </span>
         </div>
       </div>
     </div>

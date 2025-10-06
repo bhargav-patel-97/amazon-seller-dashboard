@@ -1,5 +1,5 @@
 // pages/api/sales/summary.js
-// Sales Summary Aggregation API - Returns metrics with real DB integration
+// Sales Summary Aggregation API - Returns metrics with real DB integration ONLY
 
 import { supabase } from '../../../lib/supabaseClient'
 
@@ -14,8 +14,8 @@ export default async function handler(req, res) {
     const { 
       marketplace = 'US', 
       sku = '', 
-      from = '2024-01-01', 
-      to = '2024-12-31',
+      from = getCurrentWeekStart(), 
+      to = getCurrentWeekEnd(),
       userId 
     } = req.query
 
@@ -133,11 +133,6 @@ export default async function handler(req, res) {
           units: parseInt(record.unit_count || 0),
           orders: parseInt(record.order_count || 0)
         }))
-
-        response.dataSource = 'database'
-      } else {
-        console.log('No sales data found, returning sample data')
-        response.dataSource = 'sample'
       }
 
       // 5. Add ads spend data
@@ -179,46 +174,19 @@ export default async function handler(req, res) {
         }))
       }
 
-      // 7. If no real data, provide sample data for development
-      if (response.salesData.length === 0) {
-        console.log('No database records found, providing sample data for development')
-        
-        response.metrics = {
-          revenue: 45230.50,
-          orders: 342,
-          unitsSold: 678,
-          conversionRate: 4.2,
-          adSpend: 8945.30,
-          acos: 19.8
-        }
-
-        response.salesData = generateSampleSalesData(from, to)
-        response.topSkus = generateSampleSkuData()
-        response.dataSource = 'sample'
-      }
-
-      // 8. Return successful response
+      // 7. Return successful response (NO SAMPLE DATA FALLBACK)
       console.log(`Returning summary: ${response.salesData.length} data points, ${response.topSkus.length} SKUs`)
       return res.status(200).json(response)
 
     } catch (dbError) {
       console.error('Database query failed:', dbError)
       
-      // Fallback to sample data on database error
-      response.metrics = {
-        revenue: 45230.50,
-        orders: 342,
-        unitsSold: 678,
-        conversionRate: 4.2,
-        adSpend: 8945.30,
-        acos: 19.8
-      }
-      response.salesData = generateSampleSalesData(from, to)
-      response.topSkus = generateSampleSkuData()
-      response.dataSource = 'sample'
-      response.warning = 'Using sample data due to database connection issue'
-
-      return res.status(200).json(response)
+      // Return error instead of sample data
+      return res.status(500).json({ 
+        error: 'Database query failed',
+        message: dbError.message,
+        success: false 
+      })
     }
 
   } catch (error) {
@@ -232,51 +200,22 @@ export default async function handler(req, res) {
   }
 }
 
-// Helper function to generate sample sales data for development
-function generateSampleSalesData(fromDate, toDate) {
-  const data = []
-  const start = new Date(fromDate)
-  const end = new Date(toDate)
-  const diffTime = Math.abs(end - start)
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-  
-  // Generate data for up to 30 days to keep response manageable
-  const daysToGenerate = Math.min(diffDays, 30)
-  
-  for (let i = 0; i < daysToGenerate; i++) {
-    const date = new Date(start)
-    date.setDate(start.getDate() + i)
-    
-    data.push({
-      date: date.toISOString().split('T')[0],
-      sales: Math.round((Math.random() * 2000 + 500) * 100) / 100,
-      adSpend: Math.round((Math.random() * 400 + 100) * 100) / 100,
-      units: Math.floor(Math.random() * 50 + 10),
-      orders: Math.floor(Math.random() * 25 + 5)
-    })
-  }
-  
-  return data
+// Helper function to get current week start date (Monday)
+function getCurrentWeekStart() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - daysToMonday)
+  return monday.toISOString().split('T')[0]
 }
 
-// Helper function to generate sample SKU data
-function generateSampleSkuData() {
-  const skuNames = [
-    'Premium Widget Pro', 
-    'Classic Gadget v2', 
-    'Essential Tool Kit',
-    'Advanced Controller',
-    'Standard Accessory',
-    'Deluxe Package',
-    'Basic Starter Set',
-    'Professional Grade'
-  ]
-  
-  return skuNames.map((name, index) => ({
-    sku: `SKU-${1000 + index}`,
-    name: name,
-    value: Math.round((Math.random() * 5000 + 1000) * 100) / 100,
-    units: Math.floor(Math.random() * 200 + 50),
-    price: Math.round((Math.random() * 80 + 20) * 100) / 100
-  }))
+// Helper function to get current week end date (Sunday)
+function getCurrentWeekEnd() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek
+  const sunday = new Date(today)
+  sunday.setDate(today.getDate() + daysToSunday)
+  return sunday.toISOString().split('T')[0]
 }

@@ -1,14 +1,33 @@
 // components/MarketFilter.js
-// Marketplace, SKU, and Date Range Filter Component
+// Marketplace, SKU, and Date Range Filter Component - Current week default
 
 import { useState } from 'react'
+
+// Helper functions for current week dates
+function getCurrentWeekStart() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - daysToMonday)
+  return monday.toISOString().split('T')[0]
+}
+
+function getCurrentWeekEnd() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek
+  const sunday = new Date(today)
+  sunday.setDate(today.getDate() + daysToSunday)
+  return sunday.toISOString().split('T')[0]
+}
 
 const MarketFilter = ({ filters, onFilterChange }) => {
   const [localFilters, setLocalFilters] = useState(filters || {
     marketplace: 'US',
     sku: '',
-    fromDate: '2024-01-01',
-    toDate: '2024-12-31'
+    fromDate: getCurrentWeekStart(),
+    toDate: getCurrentWeekEnd()
   })
 
   const handleFilterChange = (field, value) => {
@@ -100,6 +119,15 @@ const MarketFilter = ({ filters, onFilterChange }) => {
           <span className="text-sm text-gray-600 mr-2">Quick ranges:</span>
           <button
             onClick={() => {
+              handleFilterChange('fromDate', getCurrentWeekStart())
+              handleFilterChange('toDate', getCurrentWeekEnd())
+            }}
+            className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-md transition-colors"
+          >
+            Current week
+          </button>
+          <button
+            onClick={() => {
               const today = new Date()
               const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
               handleFilterChange('fromDate', lastWeek.toISOString().split('T')[0])
@@ -130,17 +158,6 @@ const MarketFilter = ({ filters, onFilterChange }) => {
             className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
           >
             This month
-          </button>
-          <button
-            onClick={() => {
-              const today = new Date()
-              const thisYear = new Date(today.getFullYear(), 0, 1)
-              handleFilterChange('fromDate', thisYear.toISOString().split('T')[0])
-              handleFilterChange('toDate', today.toISOString().split('T')[0])
-            }}
-            className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-          >
-            This year
           </button>
         </div>
       </div>
