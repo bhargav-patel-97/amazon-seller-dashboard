@@ -1,5 +1,6 @@
 // pages/dashboard/index.js
 // Protected Sales Dashboard with Filters and Charts
+
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabaseClient'
@@ -142,24 +143,62 @@ export default function Dashboard({ session }) {
   // Loading state
   if (loading && !dashboardData.salesData.length) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading dashboard...</p>
+      <div style={{ 
+        minHeight: '100vh', 
+        backgroundColor: '#f9fafb', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center' 
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            border: '4px solid #f3f4f6',
+            borderTop: '4px solid #3b82f6',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px'
+          }}></div>
+          <p style={{ color: '#6b7280' }}>Loading dashboard...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
+      <header style={{ 
+        backgroundColor: 'white', 
+        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', 
+        borderBottom: '1px solid #e5e7eb' 
+      }}>
+        <div style={{ 
+          maxWidth: '1280px', 
+          margin: '0 auto', 
+          padding: '0 16px' 
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            padding: '16px 0' 
+          }}>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Amazon Seller Dashboard</h1>
-              <p className="text-sm text-gray-600">
+              <h1 style={{ 
+                fontSize: '24px', 
+                fontWeight: 'bold', 
+                color: '#111827', 
+                margin: '0 0 4px 0' 
+              }}>
+                Amazon Seller Dashboard
+              </h1>
+              <p style={{ 
+                fontSize: '14px', 
+                color: '#6b7280', 
+                margin: 0 
+              }}>
                 {userProfile?.full_name || session.user.email} • 
                 {filters.marketplace} • 
                 {filters.fromDate} to {filters.toDate}
@@ -167,7 +206,18 @@ export default function Dashboard({ session }) {
             </div>
             <button
               onClick={handleSignOut}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#374151',
+                backgroundColor: '#f3f4f6',
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#e5e7eb'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#f3f4f6'}
             >
               Sign Out
             </button>
@@ -176,17 +226,27 @@ export default function Dashboard({ session }) {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main style={{ 
+        maxWidth: '1280px', 
+        margin: '0 auto', 
+        padding: '32px 16px' 
+      }}>
         {/* Error Alert */}
         {error && (
-          <div className="mb-6 p-4 border-l-4 border-red-400 bg-red-50 rounded-md">
-            <div className="flex">
-              <div className="ml-3">
-                <p className="text-sm text-red-700">
-                  <strong>Error:</strong> {error}
-                </p>
-              </div>
-            </div>
+          <div style={{
+            marginBottom: '24px',
+            padding: '16px',
+            borderLeft: '4px solid #f87171',
+            backgroundColor: '#fef2f2',
+            borderRadius: '6px'
+          }}>
+            <p style={{ 
+              fontSize: '14px', 
+              color: '#991b1b', 
+              margin: 0 
+            }}>
+              <strong>Error:</strong> {error}
+            </p>
           </div>
         )}
 
@@ -197,47 +257,58 @@ export default function Dashboard({ session }) {
         />
 
         {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+          gap: '24px',
+          marginBottom: '32px'
+        }}>
           <MetricCard 
             title="Revenue" 
-            value={`$${dashboardData.metrics.revenue?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`}
+            value={`$${dashboardData.metrics.revenue?.toLocaleString('en-US', { 
+              minimumFractionDigits: 2, 
+              maximumFractionDigits: 2 
+            }) || '0.00'}`}
             change={+5.2}
-            color="text-green-600"
+            color="#10b981"
           />
           <MetricCard 
             title="Orders" 
             value={dashboardData.metrics.orders?.toLocaleString() || '0'}
             change={+12.8}
-            color="text-blue-600"
+            color="#3b82f6"
           />
           <MetricCard 
             title="Units Sold" 
             value={dashboardData.metrics.unitsSold?.toLocaleString() || '0'}
             change={-2.1}
-            color="text-purple-600"
+            color="#8b5cf6"
           />
           <MetricCard 
             title="ACOS" 
             value={`${dashboardData.metrics.acos?.toFixed(1) || '0.0'}%`}
             change={-1.3}
-            color="text-orange-600"
+            color="#f59e0b"
             isPercentage
           />
         </div>
 
         {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr',
+          gap: '32px',
+          marginBottom: '32px'
+        }}>
           {/* Sales Chart */}
-          <div className="lg:col-span-2">
-            <SalesChart 
-              data={dashboardData.salesData}
-              loading={loading}
-            />
-          </div>
+          <SalesChart 
+            data={dashboardData.salesData}
+            loading={loading}
+          />
         </div>
 
         {/* Top SKUs Chart */}
-        <div className="mb-8">
+        <div style={{ marginBottom: '32px' }}>
           <TopSkusBar 
             data={dashboardData.topSkus}
             loading={loading}
@@ -245,33 +316,79 @@ export default function Dashboard({ session }) {
         </div>
 
         {/* Data Source Information */}
-        <div className="text-center text-sm text-gray-500">
-          <p>
+        <div style={{
+          textAlign: 'center',
+          fontSize: '14px',
+          color: '#6b7280'
+        }}>
+          <p style={{ margin: 0 }}>
             Data source: {dashboardData.dataSource || 'unknown'} • 
             Last updated: {new Date().toLocaleString()} • 
             Showing {dashboardData.salesData?.length || 0} data points
           </p>
         </div>
       </main>
+
+      {/* Add CSS animation for spinner */}
+      <style jsx>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   )
 }
 
 // Metric Card Component
-const MetricCard = ({ title, value, change, color = "text-gray-600", isPercentage = false }) => {
-  const changeColor = change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-600'
+const MetricCard = ({ 
+  title, 
+  value, 
+  change, 
+  color = "#6b7280", 
+  isPercentage = false 
+}) => {
+  const changeColor = change > 0 ? '#10b981' : change < 0 ? '#ef4444' : '#6b7280'
   const changeIcon = change > 0 ? '↗' : change < 0 ? '↘' : '→'
   
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-      <div className="flex items-center justify-between">
+    <div style={{
+      backgroundColor: 'white',
+      padding: '24px',
+      borderRadius: '8px',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+      border: '1px solid #e5e7eb'
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between'
+      }}>
         <div>
-          <p className="text-sm font-medium text-gray-500 mb-1">{title}</p>
-          <p className={`text-2xl font-bold ${color}`}>{value}</p>
+          <p style={{
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#6b7280',
+            margin: '0 0 4px 0'
+          }}>
+            {title}
+          </p>
+          <p style={{
+            fontSize: '32px',
+            fontWeight: 'bold',
+            color: color,
+            margin: 0
+          }}>
+            {value}
+          </p>
         </div>
-        <div className={`text-sm ${changeColor} text-right`}>
-          <span className="inline-block">{changeIcon}</span>
-          <span className="ml-1">
+        <div style={{
+          fontSize: '14px',
+          color: changeColor,
+          textAlign: 'right'
+        }}>
+          <span style={{ display: 'inline-block' }}>{changeIcon}</span>
+          <span style={{ marginLeft: '4px' }}>
             {Math.abs(change).toFixed(1)}{isPercentage ? 'pp' : '%'}
           </span>
         </div>
