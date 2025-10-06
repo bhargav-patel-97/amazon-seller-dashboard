@@ -1,79 +1,282 @@
 // pages/api/sales/summary.js
-import { createClient } from '@supabase/supabase-js';
+// Sales Summary Aggregation API - Returns metrics with real DB integration
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
-
-const getSampleData = () => {
-  const today = new Date();
-  const salesAdSpendData = [];
-  const topSkusData = [];
-  for (let i = 29; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - i);
-    salesAdSpendData.push({
-      date: date.toISOString().split('T')[0],
-      sales: Math.random() * 10000,
-      adSpend: Math.random() * 2000
-    });
-  }
-  const skus = ['A001','B002','C003','D004','E005','F006','G007','H008','I009','J010'];
-  skus.forEach((sku,i) => {
-    topSkusData.push({ sku, revenue: Math.random()*50000, units: Math.random()*500 });
-  });
-  return {
-    metrics: { revenue: 245680, orders: 1834, unitsSold: 3247, conversionRate: 12.5 },
-    salesAdSpendData,
-    topSkusData
-  };
-};
-
-const validate = ({ marketplace, sku, from, to }) => {
-  const valid = ['US','CA','MX'];
-  const m = valid.includes(marketplace) ? marketplace : 'US';
-  const today = new Date().toISOString().split('T')[0];
-  const ago = new Date(Date.now()-30*24*60*60*1000).toISOString().split('T')[0];
-  const f = from || ago;
-  const t = to || today;
-  return { marketplace: m, sku: sku||'', from: f, to: t };
-};
-
-const aggregateMetrics = data => {
-  const agg = data.reduce((a,c) => ({
-    revenue: a.revenue + c.sales_amount,
-    orders: a.orders + c.order_count,
-    unitsSold: a.unitsSold + c.units_sold,
-    clicks: a.clicks + c.clicks
-  }),{ revenue:0, orders:0, unitsSold:0, clicks:0 });
-  return { ...agg, conversionRate: agg.clicks ? (agg.orders/agg.clicks*100) : 0 };
-};
+import { supabase } from '../../../lib/supabaseClient'
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') return res.status(405).json({ error:'Method not allowed' });
-  const filters = validate(req.query);
-  if (req.query.sample) return res.json(getSampleData());
+  // Only allow GET requests
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
 
-  const [{ data:salesData },{ data:adData }] = await Promise.all([
-    supabase.from('sales_metrics').select('date,sales_amount').eq('marketplace',filters.marketplace).gte('date',filters.from).lte('date',filters.to),
-    supabase.from('ads_campaigns').select('date,spend').eq('marketplace',filters.marketplace).gte('date',filters.from).lte('date',filters.to)
-  ]);
+  try {
+    // Extract query parameters
+    const { 
+      marketplace = 'US', 
+      sku = '', 
+      from = '2024-01-01', 
+      to = '2024-12-31',
+      userId 
+    } = req.query
 
-  const salesAdSpendData = [];
-  const dates = new Set([...salesData.map(d=>d.date),...adData.map(d=>d.date)]);
-  dates.forEach(date => {
-    salesAdSpendData.push({ date, sales: salesData.filter(d=>d.date===date).reduce((a,c)=>a+c.sales_amount,0), adSpend: adData.filter(d=>d.date===date).reduce((a,c)=>a+c.spend,0) });
-  });
+    console.log(`API called with: marketplace=${marketplace}, sku=${sku}, from=${from}, to=${to}`)
 
-  const skuDataRaw = await supabase.from('sales_metrics').select('sku,sales_amount,units_sold').eq('marketplace',filters.marketplace).gte('date',filters.from).lte('date',filters.to);
-  const skuMap = {};
-  skuDataRaw.data.forEach(r=>{ skuMap[r.sku]=skuMap[r.sku]||{sku:r.sku,revenue:0,units:0}; skuMap[r.sku].revenue+=r.sales_amount; skuMap[r.sku].units+=r.units_sold; });
-  const topSkusData = Object.values(skuMap).sort((a,b)=>b.revenue-a.revenue).slice(0,10);
+    // Basic validation
+    if (!from || !to) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters', 
+        message: 'from and to dates are required' 
+      })
+    }
 
-  const metricsRaw = await supabase.from('sales_metrics').select('sales_amount,order_count,units_sold,clicks').eq('marketplace',filters.marketplace).gte('date',filters.from).lte('date',filters.to);
-  const metrics = metricsRaw.data.length ? aggregateMetrics(metricsRaw.data) : null;
-  if (!metrics) return res.json(getSampleData());
+    // Initialize response structure
+    const response = {
+      success: true,
+      metrics: {
+        revenue: 0,
+        orders: 0,
+        unitsSold: 0,
+        conversionRate: 0,
+        adSpend: 0,
+        acos: 0
+      },
+      salesData: [],
+      topSkus: [],
+      dateRange: { from, to, marketplace },
+      dataSource: 'database'
+    }
 
-  res.json({ metrics, salesAdSpendData, topSkusData });
+    try {
+      // 1. Fetch sales metrics from database
+      let salesQuery = supabase
+        .from('sales_metrics')
+        .select('*')
+        .gte('date', from)
+        .lte('date', to)
+        .order('date', { ascending: true })
+
+      // Add marketplace filter (map US/CA/MX to marketplace IDs)
+      const marketplaceIds = {
+        'US': 'ATVPDKIKX0DER',
+        'CA': 'A2EUQ1WTGCTBG2', 
+        'MX': 'A1AM78C64UM0Y8'
+      }
+      
+      if (marketplace && marketplaceIds[marketplace]) {
+        salesQuery = salesQuery.eq('marketplace_id', marketplaceIds[marketplace])
+      }
+
+      const { data: salesData, error: salesError } = await salesQuery
+
+      if (salesError) {
+        console.error('Sales data query error:', salesError)
+        throw salesError
+      }
+
+      console.log(`Found ${salesData?.length || 0} sales records`)
+
+      // 2. Fetch ads spend data
+      let adsQuery = supabase
+        .from('ads_campaigns')
+        .select('spend, sales, clicks, impressions, start_date')
+        .gte('start_date', from)
+        .lte('start_date', to)
+
+      const { data: adsData, error: adsError } = await adsQuery
+      
+      if (adsError) {
+        console.error('Ads data query error:', adsError)
+        // Don't fail if ads data is not available
+      }
+
+      console.log(`Found ${adsData?.length || 0} ads records`)
+
+      // 3. Fetch inventory/SKU data for top SKUs
+      let inventoryQuery = supabase
+        .from('inventory')
+        .select('sku, product_name, selling_price, quantity_available')
+        .order('quantity_available', { ascending: false })
+        .limit(10)
+
+      // Add SKU filter if provided
+      if (sku && sku.trim()) {
+        inventoryQuery = inventoryQuery.ilike('sku', `%${sku.trim()}%`)
+      }
+
+      const { data: inventoryData, error: inventoryError } = await inventoryQuery
+
+      if (inventoryError) {
+        console.error('Inventory data query error:', inventoryError)
+      }
+
+      // 4. Process and aggregate data
+      if (salesData && salesData.length > 0) {
+        // Calculate totals
+        const totals = salesData.reduce((acc, record) => {
+          acc.revenue += parseFloat(record.total_sales || 0)
+          acc.orders += parseInt(record.order_count || 0)
+          acc.unitsSold += parseInt(record.unit_count || 0)
+          return acc
+        }, { revenue: 0, orders: 0, unitsSold: 0 })
+
+        response.metrics.revenue = Math.round(totals.revenue * 100) / 100
+        response.metrics.orders = totals.orders
+        response.metrics.unitsSold = totals.unitsSold
+        response.metrics.conversionRate = totals.orders > 0 ? 
+          Math.round((totals.unitsSold / totals.orders) * 100) / 100 : 0
+
+        // Format sales data for charts
+        response.salesData = salesData.map(record => ({
+          date: record.date,
+          sales: parseFloat(record.total_sales || 0),
+          adSpend: 0, // Will be populated from ads data
+          units: parseInt(record.unit_count || 0),
+          orders: parseInt(record.order_count || 0)
+        }))
+
+        response.dataSource = 'database'
+      } else {
+        console.log('No sales data found, returning sample data')
+        response.dataSource = 'sample'
+      }
+
+      // 5. Add ads spend data
+      if (adsData && adsData.length > 0) {
+        const adsTotal = adsData.reduce((acc, record) => {
+          acc.spend += parseFloat(record.spend || 0)
+          acc.sales += parseFloat(record.sales || 0)
+          return acc
+        }, { spend: 0, sales: 0 })
+
+        response.metrics.adSpend = Math.round(adsTotal.spend * 100) / 100
+        response.metrics.acos = adsTotal.sales > 0 ? 
+          Math.round((adsTotal.spend / adsTotal.sales) * 10000) / 100 : 0
+
+        // Merge ads data with sales data by date
+        const adsMap = adsData.reduce((map, record) => {
+          const dateKey = record.start_date
+          if (!map[dateKey]) {
+            map[dateKey] = 0
+          }
+          map[dateKey] += parseFloat(record.spend || 0)
+          return map
+        }, {})
+
+        response.salesData = response.salesData.map(record => ({
+          ...record,
+          adSpend: adsMap[record.date] || 0
+        }))
+      }
+
+      // 6. Process top SKUs data  
+      if (inventoryData && inventoryData.length > 0) {
+        response.topSkus = inventoryData.map(item => ({
+          sku: item.sku,
+          name: item.product_name || `Product ${item.sku}`,
+          value: parseFloat(item.selling_price || 0) * parseInt(item.quantity_available || 0),
+          units: parseInt(item.quantity_available || 0),
+          price: parseFloat(item.selling_price || 0)
+        }))
+      }
+
+      // 7. If no real data, provide sample data for development
+      if (response.salesData.length === 0) {
+        console.log('No database records found, providing sample data for development')
+        
+        response.metrics = {
+          revenue: 45230.50,
+          orders: 342,
+          unitsSold: 678,
+          conversionRate: 4.2,
+          adSpend: 8945.30,
+          acos: 19.8
+        }
+
+        response.salesData = generateSampleSalesData(from, to)
+        response.topSkus = generateSampleSkuData()
+        response.dataSource = 'sample'
+      }
+
+      // 8. Return successful response
+      console.log(`Returning summary: ${response.salesData.length} data points, ${response.topSkus.length} SKUs`)
+      return res.status(200).json(response)
+
+    } catch (dbError) {
+      console.error('Database query failed:', dbError)
+      
+      // Fallback to sample data on database error
+      response.metrics = {
+        revenue: 45230.50,
+        orders: 342,
+        unitsSold: 678,
+        conversionRate: 4.2,
+        adSpend: 8945.30,
+        acos: 19.8
+      }
+      response.salesData = generateSampleSalesData(from, to)
+      response.topSkus = generateSampleSkuData()
+      response.dataSource = 'sample'
+      response.warning = 'Using sample data due to database connection issue'
+
+      return res.status(200).json(response)
+    }
+
+  } catch (error) {
+    console.error('Sales summary API error:', error)
+    
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      message: error.message,
+      success: false 
+    })
+  }
+}
+
+// Helper function to generate sample sales data for development
+function generateSampleSalesData(fromDate, toDate) {
+  const data = []
+  const start = new Date(fromDate)
+  const end = new Date(toDate)
+  const diffTime = Math.abs(end - start)
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  
+  // Generate data for up to 30 days to keep response manageable
+  const daysToGenerate = Math.min(diffDays, 30)
+  
+  for (let i = 0; i < daysToGenerate; i++) {
+    const date = new Date(start)
+    date.setDate(start.getDate() + i)
+    
+    data.push({
+      date: date.toISOString().split('T')[0],
+      sales: Math.round((Math.random() * 2000 + 500) * 100) / 100,
+      adSpend: Math.round((Math.random() * 400 + 100) * 100) / 100,
+      units: Math.floor(Math.random() * 50 + 10),
+      orders: Math.floor(Math.random() * 25 + 5)
+    })
+  }
+  
+  return data
+}
+
+// Helper function to generate sample SKU data
+function generateSampleSkuData() {
+  const skuNames = [
+    'Premium Widget Pro', 
+    'Classic Gadget v2', 
+    'Essential Tool Kit',
+    'Advanced Controller',
+    'Standard Accessory',
+    'Deluxe Package',
+    'Basic Starter Set',
+    'Professional Grade'
+  ]
+  
+  return skuNames.map((name, index) => ({
+    sku: `SKU-${1000 + index}`,
+    name: name,
+    value: Math.round((Math.random() * 5000 + 1000) * 100) / 100,
+    units: Math.floor(Math.random() * 200 + 50),
+    price: Math.round((Math.random() * 80 + 20) * 100) / 100
+  }))
 }

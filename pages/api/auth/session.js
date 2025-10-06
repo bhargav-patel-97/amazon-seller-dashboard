@@ -1,4 +1,8 @@
-import { supabaseService } from '../../../lib/supabaseService'
+// pages/api/auth/session.js
+// Session verification endpoint for protected routes
+
+import { supabase } from '../../../lib/supabaseClient'
+import jwt from 'jsonwebtoken'
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -6,32 +10,42 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get token from Authorization header
     const authHeader = req.headers.authorization
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'No valid authorization header' })
+      return res.status(401).json({ error: 'Missing or invalid authorization header' })
     }
 
-    const token = authHeader.substring(7)
-
-    // Verify token with Supabase
-    const { data: { user }, error } = await supabaseService.auth.getUser(token)
-
-    if (error || !user) {
+    const token = authHeader.split(' ')[1]
+    
+    // Verify the JWT token with Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token)
+    
+    if (error) {
+      console.error('Token verification failed:', error)
       return res.status(401).json({ error: 'Invalid or expired token' })
     }
 
-    res.status(200).json({
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' })
+    }
+
+    // Return user information
+    return res.status(200).json({
+      success: true,
       user: {
         id: user.id,
         email: user.email,
-        user_metadata: user.user_metadata
+        role: user.role || 'authenticated'
       },
-      authenticated: true
+      message: 'Session valid'
     })
 
   } catch (error) {
     console.error('Session verification error:', error)
-    res.status(500).json({ error: 'Internal server error' })
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      message: error.message 
+    })
   }
 }
