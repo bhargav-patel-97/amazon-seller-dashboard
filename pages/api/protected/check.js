@@ -1,4 +1,4 @@
-import { supabaseService } from '../../../lib/supabaseService'
+import { SupabaseService } from '../../../lib/supabaseService'
 import cookie from 'cookie'
 
 export default async function handler(req, res) {
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     }
 
     // Verify token server-side using service role client
-    const { data: { user }, error } = await supabaseService.auth.getUser(token)
+    const { data: { user }, error } = await SupabaseService.auth.getUser(token)
 
     if (error || !user) {
       return res.status(401).json({ 
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     }
 
     // Example: Fetch user's seller data using service role privileges
-    const { data: sellerData, error: sellerError } = await supabaseService
+    const { data: sellerData, error: sellerError } = await SupabaseService
       .from('users')
       .select('*')
       .eq('id', user.id)
