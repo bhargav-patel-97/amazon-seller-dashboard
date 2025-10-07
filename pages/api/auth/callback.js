@@ -1,6 +1,3 @@
-Here is the updated `pages/api/auth/callback.js` file with the Amazon Ads refresh token extraction and optional Vercel environment update logic included. Deploy this version to capture and log the `ADS_REFRESH_TOKEN`.
-
-```javascript
 import { supabase } from '../../../lib/supabaseClient'
 import cookie from 'cookie'
 
@@ -69,4 +66,3 @@ export default async function handler(req, res) {
 
   res.redirect('/')
 }
-```
