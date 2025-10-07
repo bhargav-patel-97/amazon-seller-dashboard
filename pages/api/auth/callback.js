@@ -8,9 +8,8 @@ export default async function handler(req, res) {
 
   const { code, error: authError } = req.query
   const cookies = cookie.parse(req.headers.cookie || '')
-  const codeVerifier = cookies['pkce_code_verifier']
+  const hasPkce = Boolean(cookies['pkce_code_verifier'])
 
-  // If Amazon redirected an error
   if (authError) {
     console.error('OAuth callback error:', authError)
     return res.redirect(`/?error=${encodeURIComponent(authError)}`)
@@ -23,20 +22,15 @@ export default async function handler(req, res) {
   try {
     let data, error
 
-    if (codeVerifier) {
-      // 1. Amazon PKCE flow: exchange code + verifier
-      ;({ data, error } = await supabase.auth.exchangeCodeForSession({
-        code,
-        codeVerifier
-      }))
-      // Remove verifier cookie
+    // Use raw code string for both PKCE and non-PKCE flows
+    ;({ data, error } = await supabase.auth.exchangeCodeForSession(code))
+
+    // Clear PKCE verifier if it existed
+    if (hasPkce) {
       res.setHeader('Set-Cookie', cookie.serialize('pkce_code_verifier', '', {
         maxAge: 0,
         path: '/'
       }))
-    } else {
-      // 2. Non-PKCE flow (e.g., Google): standard code exchange
-      ;({ data, error } = await supabase.auth.exchangeCodeForSession(code))
     }
 
     if (error) {
@@ -45,11 +39,9 @@ export default async function handler(req, res) {
     }
 
     if (data.session) {
-      // If Amazon flow, log the refresh token
+      // Log Amazon Ads refresh token if available
       if (data.session.provider_refresh_token) {
-        const amazonAdsRefreshToken = data.session.provider_refresh_token
-        console.log('AMAZON_ADS_REFRESH_TOKEN:', amazonAdsRefreshToken)
-        // (Optional) Persist to Vercel here...
+        console.log('AMAZON_ADS_REFRESH_TOKEN:', data.session.provider_refresh_token)
       }
 
       // Set Supabase auth cookie
@@ -57,7 +49,7 @@ export default async function handler(req, res) {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7, // 7 days
+        maxAge: 60 * 60 * 24 * 7,
         path: '/'
       }
       res.setHeader('Set-Cookie',
