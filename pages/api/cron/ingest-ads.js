@@ -54,10 +54,9 @@ class AmazonAdsClient {
       return this.config.accessToken;
     }
 
-    // If no real credentials, return mock data
+    // Validate required credentials
     if (!this.config.clientId || !this.config.clientSecret || !this.config.refreshToken) {
-      console.log('Using mock data - no real Amazon Ads API credentials configured');
-      return 'mock_access_token';
+      throw new Error('Missing required Amazon Ads API credentials. Please configure AMAZON_ADS_CLIENT_ID, AMAZON_ADS_CLIENT_SECRET, and AMAZON_ADS_REFRESH_TOKEN environment variables.');
     }
 
     try {
@@ -75,7 +74,8 @@ class AmazonAdsClient {
       });
 
       if (!tokenResponse.ok) {
-        throw new Error(`Token refresh failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
+        const errorText = await tokenResponse.text();
+        throw new Error(`Token refresh failed: ${tokenResponse.status} ${tokenResponse.statusText} - ${errorText}`);
       }
 
       const tokenData = await tokenResponse.json();
@@ -92,11 +92,6 @@ class AmazonAdsClient {
   async makeApiCall(endpoint, options = {}) {
     const accessToken = await this.getAccessToken();
     
-    // If using mock token, return mock data
-    if (accessToken === 'mock_access_token') {
-      return this.getMockCampaignsData();
-    }
-
     const url = `${this.config.baseUrl}${endpoint}`;
     const headers = {
       'Authorization': `Bearer ${accessToken}`,
@@ -113,7 +108,8 @@ class AmazonAdsClient {
     });
 
     if (!response.ok) {
-      throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     return await response.json();
@@ -121,85 +117,70 @@ class AmazonAdsClient {
 
   async getCampaignsData(startDate, endDate) {
     try {
-      // If no real credentials, return mock data
-      if (!this.config.clientId || this.config.accessToken === 'mock_access_token') {
-        return this.getMockCampaignsData(startDate, endDate);
-      }
-
-      // Real API call to get campaigns
+      console.log(`Fetching campaigns data from Amazon Ads API for ${startDate} to ${endDate}`);
+      
+      // Step 1: Get all campaigns
       const campaigns = await this.makeApiCall('/v2/campaigns', {
         method: 'GET'
       });
 
-      // Get campaign performance metrics
-      const metricsResponse = await this.makeApiCall('/v2/campaigns/report', {
+      if (!campaigns || campaigns.length === 0) {
+        console.log('No campaigns found');
+        return { campaigns: [] };
+      }
+
+      console.log(`Found ${campaigns.length} campaigns`);
+
+      // Step 2: Create report for campaign metrics
+      const reportRequest = {
+        reportDate: startDate,
+        metrics: ['campaignId', 'impressions', 'clicks', 'cost', 'sales'],
+        segment: 'query'
+      };
+
+      const reportResponse = await this.makeApiCall('/v2/campaigns/report', {
         method: 'POST',
-        body: {
-          reportDate: startDate,
-          metrics: ['impressions', 'clicks', 'cost', 'sales']
-        }
+        body: reportRequest
       });
 
-      // Combine campaign data with metrics
+      console.log('Report request submitted:', reportResponse.reportId);
+
+      // Step 3: Poll for report completion (simplified - in production you might want async processing)
+      let reportData = {};
+      try {
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds for report
+        const report = await this.makeApiCall(`/v2/reports/${reportResponse.reportId}`);
+        reportData = report || {};
+      } catch (error) {
+        console.warn('Could not fetch report data, using campaign data only:', error.message);
+      }
+
+      // Step 4: Combine campaign data with metrics
       const campaignsWithMetrics = campaigns.map(campaign => ({
         campaign_id: campaign.campaignId,
         campaign_name: campaign.name,
         campaign_type: campaign.campaignType,
-        state: campaign.state,
+        status: campaign.state,
+        daily_budget: parseFloat(campaign.dailyBudget || 0),
+        target_acos: campaign.targetingType === 'auto' ? null : parseFloat(campaign.bid || 0),
+        impressions: reportData[campaign.campaignId]?.impressions || 0,
+        clicks: reportData[campaign.campaignId]?.clicks || 0,
+        spend: parseFloat(reportData[campaign.campaignId]?.cost || 0),
+        sales: parseFloat(reportData[campaign.campaignId]?.sales || 0),
+        orders: reportData[campaign.campaignId]?.orders || 0,
         start_date: campaign.startDate,
         end_date: campaign.endDate,
-        date: startDate,
-        impressions: metricsResponse[campaign.campaignId]?.impressions || 0,
-        clicks: metricsResponse[campaign.campaignId]?.clicks || 0,
-        cost: metricsResponse[campaign.campaignId]?.cost || 0,
-        sales_7d: metricsResponse[campaign.campaignId]?.sales || 0,
-        profile_id: this.config.profileId,
-        last_updated: new Date().toISOString()
+        sku: campaign.portfolioId || null,
+        user_id: process.env.DEFAULT_USER_ID || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       }));
 
       return { campaigns: campaignsWithMetrics };
     } catch (error) {
-      console.warn('Real API call failed, falling back to mock data:', error.message);
-      return this.getMockCampaignsData(startDate, endDate);
+      console.error('Failed to fetch campaigns data from Amazon Ads API:', error);
+      throw error;
     }
-  }
-
-  getMockCampaignsData(startDate, endDate) {
-    // Generate mock campaign data for testing
-    const mockCampaigns = [
-      {
-        campaign_id: 'camp_123456789',
-        campaign_name: 'Summer Sale - Electronics',
-        campaign_type: 'SPONSORED_PRODUCTS',
-        state: 'ENABLED',
-        start_date: '2024-01-01',
-        end_date: '2024-12-31',
-        date: startDate,
-        impressions: Math.floor(Math.random() * 10000) + 1000,
-        clicks: Math.floor(Math.random() * 500) + 50,
-        cost: parseFloat((Math.random() * 100 + 10).toFixed(2)),
-        sales_7d: parseFloat((Math.random() * 500 + 50).toFixed(2)),
-        profile_id: this.config.profileId || 'mock_profile_id',
-        last_updated: new Date().toISOString()
-      },
-      {
-        campaign_id: 'camp_987654321',
-        campaign_name: 'Brand Awareness - Home & Garden',
-        campaign_type: 'SPONSORED_BRANDS',
-        state: 'ENABLED',
-        start_date: '2024-01-01',
-        end_date: '2024-12-31',
-        date: startDate,
-        impressions: Math.floor(Math.random() * 8000) + 800,
-        clicks: Math.floor(Math.random() * 400) + 40,
-        cost: parseFloat((Math.random() * 80 + 8).toFixed(2)),
-        sales_7d: parseFloat((Math.random() * 400 + 40).toFixed(2)),
-        profile_id: this.config.profileId || 'mock_profile_id',
-        last_updated: new Date().toISOString()
-      }
-    ];
-
-    return { campaigns: mockCampaigns };
   }
 }
 
@@ -260,7 +241,7 @@ export default async function handler(req, res) {
     // 5. Apply rate limiting before API calls
     await rateLimiter.waitForToken();
 
-    // 6. Fetch campaigns data from Ads API (or mock data)
+    // 6. Fetch campaigns data from Ads API
     const campaignsResult = await adsClient.getCampaignsData(startDate, endDate);
     
     if (!campaignsResult.campaigns || campaignsResult.campaigns.length === 0) {
@@ -287,63 +268,45 @@ export default async function handler(req, res) {
       );
     }
 
+    console.log(`Processing ${filteredCampaigns.length} campaigns`);
+
     // 8. Store campaigns data in Supabase
     const adsUpsertResult = await supabaseService.upsertAdsData(
       filteredCampaigns, 
       'ads-api-cron'
     );
 
-    // 9. Fetch additional metrics if we have real API access
-    let additionalMetrics = [];
-    if (adsClient.config.clientId && filteredCampaigns.length > 0) {
-      try {
-        await rateLimiter.waitForToken();
-        
-        // Example: Fetch keyword-level data for campaigns
-        // const keywordData = await adsClient.getKeywordMetrics(
-        //   filteredCampaigns.map(c => c.campaign_id),
-        //   startDate,
-        //   endDate
-        // );
-        // additionalMetrics = keywordData;
-      } catch (error) {
-        console.warn('Failed to fetch additional metrics:', error.message);
-      }
-    }
-
-    // 10. Log successful completion
+    // 9. Log successful completion
     const duration = Date.now() - startTime;
     await supabaseService.logIngestion('ads', 'completed', {
       recordsProcessed: adsUpsertResult.count,
       campaignsProcessed: adsUpsertResult.count,
-      additionalMetrics: additionalMetrics.length,
       campaignTypeFilter: campaignType,
       duration,
       profileId: adsClient.config.profileId
     });
 
-    // 11. Calculate summary statistics
+    // 10. Calculate summary statistics
     const totalImpressions = filteredCampaigns.reduce((sum, c) => sum + (c.impressions || 0), 0);
     const totalClicks = filteredCampaigns.reduce((sum, c) => sum + (c.clicks || 0), 0);
-    const totalCost = filteredCampaigns.reduce((sum, c) => sum + (c.cost || 0), 0);
-    const totalSales = filteredCampaigns.reduce((sum, c) => sum + (c.sales_7d || 0), 0);
+    const totalSpend = filteredCampaigns.reduce((sum, c) => sum + (c.spend || 0), 0);
+    const totalSales = filteredCampaigns.reduce((sum, c) => sum + (c.sales || 0), 0);
 
-    // 12. Return success response
+    // 11. Return success response
     res.status(200).json({
       success: true,
       message: 'Ads data ingestion completed successfully',
       recordsProcessed: {
         campaigns: adsUpsertResult.count,
-        additionalMetrics: additionalMetrics.length,
-        total: adsUpsertResult.count + additionalMetrics.length
+        total: adsUpsertResult.count
       },
       summary: {
         totalImpressions,
         totalClicks,
-        totalCost: parseFloat(totalCost.toFixed(2)),
+        totalSpend: parseFloat(totalSpend.toFixed(2)),
         totalSales: parseFloat(totalSales.toFixed(2)),
         averageCTR: totalImpressions > 0 ? (totalClicks / totalImpressions * 100).toFixed(3) + '%' : '0%',
-        averageROAS: totalCost > 0 ? (totalSales / totalCost).toFixed(2) : '0'
+        averageROAS: totalSpend > 0 ? (totalSales / totalSpend).toFixed(2) : '0'
       },
       dateRange: { startDate, endDate, campaignType },
       profileId: adsClient.config.profileId,
@@ -385,6 +348,15 @@ export default async function handler(req, res) {
         error: 'Authentication failed',
         message: 'Invalid or expired Ads API credentials',
         profileId: adsClient?.config?.profileId
+      });
+    }
+
+    if (error.message.includes('Missing required Amazon Ads API credentials')) {
+      return res.status(500).json({
+        success: false,
+        error: 'Configuration error',
+        message: 'Amazon Ads API credentials not configured',
+        requiredEnvVars: ['AMAZON_ADS_CLIENT_ID', 'AMAZON_ADS_CLIENT_SECRET', 'AMAZON_ADS_REFRESH_TOKEN', 'AMAZON_ADS_PROFILE_ID']
       });
     }
 
