@@ -7,11 +7,21 @@ export default async function handler(req, res) {
   }
 
   const { code } = req.query
+  const cookies = cookie.parse(req.headers.cookie || '')
+  const codeVerifier = cookies['pkce_code_verifier']
 
   if (code) {
+    if (!codeVerifier) {
+      console.error('Missing PKCE code_verifier')
+      return res.redirect(`/?error=${encodeURIComponent('Missing code_verifier')}`)
+    }
+
     try {
-      // Exchange code for session
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+      // Exchange code for session with PKCE verifier
+      const { data, error } = await supabase.auth.exchangeCodeForSession({
+        code,
+        codeVerifier
+      })
 
       if (error) {
         console.error('OAuth callback error:', error)
@@ -19,6 +29,12 @@ export default async function handler(req, res) {
       }
 
       if (data.session) {
+        // Clean up PKCE verifier cookie
+        res.setHeader('Set-Cookie', cookie.serialize('pkce_code_verifier', '', {
+          maxAge: 0,
+          path: '/'
+        }))
+
         // Extract Amazon Ads refresh token
         const amazonAdsRefreshToken = data.session.provider_refresh_token
         console.log('AMAZON_ADS_REFRESH_TOKEN:', amazonAdsRefreshToken)
@@ -39,7 +55,7 @@ export default async function handler(req, res) {
         })
         */
 
-        // Set secure HTTP-only cookie
+        // Set secure HTTP-only Supabase auth cookie
         const cookieOptions = {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
