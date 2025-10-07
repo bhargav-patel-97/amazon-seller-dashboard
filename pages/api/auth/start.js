@@ -18,7 +18,7 @@ export default function handler(req, res) {
   }))
 
   const params = new URLSearchParams({
-    client_id: process.env.SUPABASE_OAUTH_AMAZON_CLIENT_ID,
+    client_id: process.env.ADS_CLIENT_ID,
     scope: 'advertising::campaign_management',
     response_type: 'code',
     redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
