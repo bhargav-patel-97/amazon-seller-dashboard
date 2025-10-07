@@ -24,7 +24,7 @@ export default function handler(req, res) {
 
   // 3. Redirect to Amazon’s OAuth endpoint with challenge
   const params = new URLSearchParams({
-    client_id: process.env.SUPABASE_OAUTH_AMAZON_CLIENT_ID,
+    client_id: process.env.ADS_CLIENT_ID,
     scope: 'advertising::campaign_management',
     response_type: 'code',
     redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
