@@ -10,14 +10,14 @@ export default async function handler(req, res) {
   const cookies = cookie.parse(req.headers.cookie || '')
   const codeVerifier = cookies['pkce_code_verifier']
 
-  if (code) {
-    if (!codeVerifier) {
-      console.error('Missing PKCE code_verifier')
-      return res.redirect(`/?error=${encodeURIComponent('Missing code_verifier')}`)
-    }
+  if (!codeVerifier) {
+    console.error('Missing PKCE code_verifier')
+    return res.redirect(`/?error=${encodeURIComponent('Missing code_verifier')}`)
+  }
 
+  if (code) {
     try {
-      // Exchange code for session with PKCE verifier
+      // Exchange code + verifier for session
       const { data, error } = await supabase.auth.exchangeCodeForSession({
         code,
         codeVerifier
@@ -29,19 +29,19 @@ export default async function handler(req, res) {
       }
 
       if (data.session) {
-        // Clean up PKCE verifier cookie
+        // 1. Clear PKCE cookie
         res.setHeader('Set-Cookie', cookie.serialize('pkce_code_verifier', '', {
           maxAge: 0,
           path: '/'
         }))
 
-        // Extract Amazon Ads refresh token
+        // 2. Log (and optionally persist) Amazon Ads refresh token
         const amazonAdsRefreshToken = data.session.provider_refresh_token
         console.log('AMAZON_ADS_REFRESH_TOKEN:', amazonAdsRefreshToken)
 
-        // OPTIONAL: Persist to Vercel via API (requires VERCEL_TOKEN, project & team IDs)
         /*
-        await fetch('https://api.vercel.com/v8/projects/YOUR_PROJECT_ID/env', {
+        // OPTIONAL: Persist to Vercel env
+        await fetch(`https://api.vercel.com/v8/projects/${process.env.VERCEL_PROJECT_ID}/env`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${process.env.VERCEL_TOKEN}`,
@@ -55,12 +55,12 @@ export default async function handler(req, res) {
         })
         */
 
-        // Set secure HTTP-only Supabase auth cookie
+        // 3. Set Supabase auth cookie
         const cookieOptions = {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
           sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7, // 7 days
+          maxAge: 60 * 60 * 24 * 7,
           path: '/'
         }
         res.setHeader('Set-Cookie',
@@ -71,14 +71,14 @@ export default async function handler(req, res) {
           )
         )
 
-        // Redirect to dashboard
+        // 4. Redirect into your app
         return res.redirect('/dashboard')
       }
-    } catch (error) {
-      console.error('Unexpected callback error:', error)
+    } catch (err) {
+      console.error('Unexpected callback error:', err)
       return res.redirect(`/?error=${encodeURIComponent('Authentication failed')}`)
     }
   }
 
-  res.redirect('/')
+  return res.redirect('/')
 }
