@@ -6,78 +6,73 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { code } = req.query
+  const { code, error: authError } = req.query
   const cookies = cookie.parse(req.headers.cookie || '')
   const codeVerifier = cookies['pkce_code_verifier']
 
-  if (!codeVerifier) {
-    console.error('Missing PKCE code_verifier')
-    return res.redirect(`/?error=${encodeURIComponent('Missing code_verifier')}`)
+  // If Amazon redirected an error
+  if (authError) {
+    console.error('OAuth callback error:', authError)
+    return res.redirect(`/?error=${encodeURIComponent(authError)}`)
   }
 
-  if (code) {
-    try {
-      // Exchange code + verifier for session
-      const { data, error } = await supabase.auth.exchangeCodeForSession({
+  if (!code) {
+    return res.redirect('/')
+  }
+
+  try {
+    let data, error
+
+    if (codeVerifier) {
+      // 1. Amazon PKCE flow: exchange code + verifier
+      ;({ data, error } = await supabase.auth.exchangeCodeForSession({
         code,
         codeVerifier
-      })
+      }))
+      // Remove verifier cookie
+      res.setHeader('Set-Cookie', cookie.serialize('pkce_code_verifier', '', {
+        maxAge: 0,
+        path: '/'
+      }))
+    } else {
+      // 2. Non-PKCE flow (e.g., Google): standard code exchange
+      ;({ data, error } = await supabase.auth.exchangeCodeForSession(code))
+    }
 
-      if (error) {
-        console.error('OAuth callback error:', error)
-        return res.redirect(`/?error=${encodeURIComponent(error.message)}`)
-      }
+    if (error) {
+      console.error('OAuth callback error:', error)
+      return res.redirect(`/?error=${encodeURIComponent(error.message)}`)
+    }
 
-      if (data.session) {
-        // 1. Clear PKCE cookie
-        res.setHeader('Set-Cookie', cookie.serialize('pkce_code_verifier', '', {
-          maxAge: 0,
-          path: '/'
-        }))
-
-        // 2. Log (and optionally persist) Amazon Ads refresh token
+    if (data.session) {
+      // If Amazon flow, log the refresh token
+      if (data.session.provider_refresh_token) {
         const amazonAdsRefreshToken = data.session.provider_refresh_token
         console.log('AMAZON_ADS_REFRESH_TOKEN:', amazonAdsRefreshToken)
-
-        /*
-        // OPTIONAL: Persist to Vercel env
-        await fetch(`https://api.vercel.com/v8/projects/${process.env.VERCEL_PROJECT_ID}/env`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.VERCEL_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            key: 'ADS_REFRESH_TOKEN',
-            value: amazonAdsRefreshToken,
-            target: ['production']
-          })
-        })
-        */
-
-        // 3. Set Supabase auth cookie
-        const cookieOptions = {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7,
-          path: '/'
-        }
-        res.setHeader('Set-Cookie',
-          cookie.serialize(
-            'supabase-auth-token',
-            data.session.access_token,
-            cookieOptions
-          )
-        )
-
-        // 4. Redirect into your app
-        return res.redirect('/dashboard')
+        // (Optional) Persist to Vercel here...
       }
-    } catch (err) {
-      console.error('Unexpected callback error:', err)
-      return res.redirect(`/?error=${encodeURIComponent('Authentication failed')}`)
+
+      // Set Supabase auth cookie
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7, // 7 days
+        path: '/'
+      }
+      res.setHeader('Set-Cookie',
+        cookie.serialize(
+          'supabase-auth-token',
+          data.session.access_token,
+          cookieOptions
+        )
+      )
+
+      return res.redirect('/dashboard')
     }
+  } catch (err) {
+    console.error('Unexpected callback error:', err)
+    return res.redirect(`/?error=${encodeURIComponent('Authentication failed')}`)
   }
 
   return res.redirect('/')
